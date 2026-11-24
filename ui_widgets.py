@@ -21,6 +21,7 @@ from PySide6.QtGui import (
     QColor,
     QCursor,
     QFont,
+    QGuiApplication,
     QLinearGradient,
     QPainter,
     QPainterPath,
@@ -1115,16 +1116,44 @@ class QuotaWidgetWindow(QWidget):
         if IS_WINDOWS and self.isVisible():
             apply_window_layer(int(self.winId()), self.cfg.layer_mode)
 
+    def _find_target_screen(self, x: int, y: int):
+        screens = QGuiApplication.screens()
+        if not screens:
+            return self.screen()
+
+        # Prefer the screen containing the saved card center (handles edge/shadow overhang cleanly)
+        cx = x + self.width() // 2
+        cy = y + max(80, self.height()) // 2
+        center_pt = QPoint(cx, cy)
+        for s in screens:
+            if s.geometry().contains(center_pt):
+                return s
+
+        # Fallback: screen containing the saved top-left (expanded by shadow margin)
+        top_left = QPoint(x, y)
+        m = self.SHADOW_MARGIN
+        for s in screens:
+            if s.geometry().adjusted(-m, -m, m, m).contains(top_left):
+                return s
+
+        # If previously saved monitor is disconnected, recover onto primary screen
+        return QGuiApplication.primaryScreen() or self.screen() or screens[0]
+
     def _place_initial_position(self) -> None:
-        screen = self.screen()
-        if screen is None:
-            return
-        geo = screen.availableGeometry()
         if self.cfg.x is not None and self.cfg.y is not None:
-            x = max(geo.left() - 60, min(geo.right() - 80, self.cfg.x))
-            y = max(geo.top(), min(geo.bottom() - 80, self.cfg.y))
+            screen = self._find_target_screen(self.cfg.x, self.cfg.y)
+            if screen is None:
+                return
+            geo = screen.availableGeometry()
+            m = self.SHADOW_MARGIN
+            x = max(geo.left() - m, min(geo.right() - 80, self.cfg.x))
+            y = max(geo.top() - m, min(geo.bottom() - 80, self.cfg.y))
             self.move(x, y)
         else:
+            screen = QGuiApplication.primaryScreen() or self.screen()
+            if screen is None:
+                return
+            geo = screen.availableGeometry()
             x = geo.right() - self.width() - 18
             y = geo.top() + 24
             self.move(x, y)
